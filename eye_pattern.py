@@ -1,27 +1,34 @@
+# 라이브러리
 import cv2, dlib
 import numpy as np
 from imutils import face_utils
 from tensorflow.keras.models import load_model
 import winsound
 
+# 이미지 크기
 IMG_SIZE = (64,56)
+# 눈 크기
 B_SIZE = (34, 26)
+# 여백
 margin = 95
 class_labels = ['center','left', 'right'] 
+# 감지기 초기화
 detector = dlib.get_frontal_face_detector()
+# 예측기 초기화
 predictor = dlib.shape_predictor('shape_predictor_68_face_landmarks.dat')
 
+# font 설정
 font_letter = cv2.FONT_HERSHEY_PLAIN
+# 눈동자 위치 예측 모델 불러오기
 model = load_model('models/gazev3.1.h5')
+# 눈 깜빡임 감지 모델 불러오기
 model_b = load_model('models/blinkdetection.h5')
-
 
 def detect_gaze(eye_img):
     pred_l = model.predict(eye_img)
     accuracy = int(np.array(pred_l).max() * 100)
     gaze = class_labels[np.argmax(pred_l)]
     return gaze
-
 
 def detect_blink(eye_img):
     pred_B = model_b.predict(eye_img)
@@ -30,7 +37,6 @@ def detect_blink(eye_img):
     status = round(status,3)
     return  status
 
-   
 def crop_eye(img, eye_points):
     x1, y1 = np.amin(eye_points, axis=0)
     x2, y2 = np.amax(eye_points, axis=0)
@@ -53,16 +59,17 @@ def crop_eye(img, eye_points):
 # main
 cap = cv2.VideoCapture(0)
 # pattern = []
-# frames = 10
+# frames = 10 
 # pattern_length = 0
 frames_to_blink = 6
 blinking_frames = 0
-while cap.isOpened():
-    output = np.zeros((900,820,3), dtype="uint8")
+blinking_frames_total = 0 
+while cap.isOpened(): 
+    output = np.zeros((900,820,3), dtype="uint8") 
     ret, img = cap.read()
     img = cv2.flip(img,flipCode = 1)
     h,w = (112,128)	
-    if not ret:
+    if not ret: 
         break
 
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -73,11 +80,10 @@ while cap.isOpened():
     for face in faces:
         shapes = predictor(gray, face)
         
-
-        for n in range(36,42):
-            x= shapes.part(n).x
+        for n in range(36,42): 
+            x= shapes.part(n).x 
             y = shapes.part(n).y
-            next_point = n+1
+            next_point = n+1 
             if n==41:
                 next_point = 36 
             
@@ -85,7 +91,7 @@ while cap.isOpened():
             y2 = shapes.part(next_point).y
             cv2.line(img,(x,y),(x2,y2),(0,69,255),2)
 
-        for n in range(42,48):
+        for n in range(42,48): 
             x= shapes.part(n).x
             y = shapes.part(n).y
             next_point = n+1
@@ -96,6 +102,7 @@ while cap.isOpened():
             y2 = shapes.part(next_point).y
             cv2.line(img,(x,y),(x2,y2),(153,0,153),2)
         shapes = face_utils.shape_to_np(shapes)
+    # -------------------------------------
         #~~~~~~~~~~~~~~~~~56,64 EYE IMAGE~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
         eye_img_l, eye_rect_l = crop_eye(gray, eye_points=shapes[36:42])
         eye_img_r, eye_rect_r = crop_eye(gray, eye_points=shapes[42:48])
@@ -107,6 +114,7 @@ while cap.isOpened():
         #~~~~~~~~~~~~~~~~~FOR THE BLINK DETECTION~~~~~~~~~~~~~~~~~~~~~~~
         eye_blink_left = cv2.resize(eye_img_l.copy(), B_SIZE)
         eye_blink_right = cv2.resize(eye_img_r.copy(), B_SIZE)
+
         eye_blink_left_i = eye_blink_left.reshape((1, B_SIZE[1], B_SIZE[0], 1)).astype(np.float32) / 255.
         eye_blink_right_i = eye_blink_right.reshape((1, B_SIZE[1], B_SIZE[0], 1)).astype(np.float32) / 255.
         #~~~~~~~~~~~~~~~~FOR THE GAZE DETECTIOM~~~~~~~~~~~~~~~~~~~~~~~~#
@@ -118,12 +126,14 @@ while cap.isOpened():
         gaze =  detect_gaze(eye_input_g)
         if gaze == class_labels[1]:
             blinking_frames += 1
+            blinking_frames_total += 1  # 수정된 부분: 눈 깜빡임 횟수 누적
             if blinking_frames == frames_to_blink:
                 # pattern_length +=1
                 winsound.Beep(1000,250)
                 # pattern.append(1)
         elif gaze == class_labels[2]:
             blinking_frames += 1
+            blinking_frames_total += 1  # 수정된 부분: 눈 깜빡임 횟수 누적
             if blinking_frames == frames_to_blink:
                 # pattern_length +=1
                 winsound.Beep(1000,250)
@@ -131,6 +141,7 @@ while cap.isOpened():
 
         elif status_l < 0.1:
             blinking_frames += 1
+            blinking_frames_total += 1  # 수정된 부분: 눈 깜빡임 횟수 누적
             if blinking_frames == frames_to_blink:
                 # pattern_length +=1
                 # pattern.append(3)
@@ -154,8 +165,26 @@ while cap.isOpened():
         output[0:112, 3*margin+3*w:(3*margin+3*w)+w] = eye_img_r_view
         cv2.putText(output, (str(status_l)+"%"),((3*margin+3*w),150), font_letter,2, (0,0,255),2)
         output[235+100:715+100, 80:720] = img
+
+        # 변경한 부분
+        # 화면에 눈 깜빡임 횟수 표시
+        cv2.putText(output, "Blink Count: " + str(blinking_frames_total), (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+        #
+        # 오류
+        # 정면인 경우에만 눈 깜빡임 카운트됨
+        # 눈 감고 있을 때 카운트 올라감
+        # 
+
+        #cv2.imshow('result',output)
         
-        cv2.imshow('result',output)
+        # 변경한 부분
+        cv2.namedWindow('result', cv2.WINDOW_NORMAL)  # 창의 이름과 창의 속성을 설정합니다.
+        cv2.resizeWindow('result', 1280, 720)  # 창의 크기를 원하는 크기로 조정합니다.
+
+        cv2.imshow('result', output)  # 이미지를 디스플레이합니다.
+        #
+
+    # q 로 종료
     if cv2.waitKey(1) == ord('q') : 
         break
 cap.release()
